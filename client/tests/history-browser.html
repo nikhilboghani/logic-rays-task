@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Undo and redo regression</title></head>
+<body>
+  <div id="root"></div>
+  <pre id="result">RUNNING</pre>
+  <script type="module">
+    import React, { StrictMode } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import App from '/src/App.jsx';
+
+    // Keep this regression isolated from the user's saved grid.
+    window.fetch = async () => Response.json({ success: true, data: { selectedBoxes: [2] } });
+    const pause = () => new Promise(resolve => setTimeout(resolve, 40));
+    const box = id => document.querySelector(`[aria-label="Box ${id}"]`);
+    const button = label => [...document.querySelectorAll('button')].find(item => item.textContent.trim() === label);
+    const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const click = async element => { check(element, 'Missing button'); element.click(); await pause(); };
+    createRoot(document.getElementById('root')).render(React.createElement(StrictMode, null, React.createElement(App)));
+    try {
+      for (let attempt = 0; attempt < 100 && !box(1); attempt++) await pause();
+      check(box(3)?.getAttribute('aria-pressed') === 'true', 'Saved grid was not loaded');
+      check(button('Undo').disabled, 'Initial undo should be disabled');
+      await click(box(1));
+      await click(box(2));
+      check(!button('Undo').disabled, 'Undo did not enable after selection');
+      await click(button('Undo'));
+      check(box(2).getAttribute('aria-pressed') === 'false', 'Undo did not deselect box 2');
+      check(box(1).getAttribute('aria-pressed') === 'true', 'Undo removed too much');
+      await click(button('Undo'));
+      check(box(1).getAttribute('aria-pressed') === 'false', 'Second undo failed');
+      check(box(3).getAttribute('aria-pressed') === 'true', 'Undo changed loaded selection');
+      check(button('Undo').disabled, 'Undo should stop at loaded selection');
+      await click(button('Redo'));
+      await click(button('Redo'));
+      check(box(1).getAttribute('aria-pressed') === 'true' && box(2).getAttribute('aria-pressed') === 'true', 'Redo did not restore selections');
+      check(button('Redo').disabled, 'Redo should stop at latest selection');
+      await click(button('Clear All'));
+      check(!document.querySelector('[aria-pressed="true"]'), 'Clear failed');
+      await click(button('Undo'));
+      check(document.querySelectorAll('[aria-pressed="true"]').length === 3, 'Undo clear failed');
+      await click(box(4));
+      check(button('Redo').disabled, 'New action should clear redo');
+      await click(button('Save Selector'));
+      await click(button('Undo'));
+      check(box(4).getAttribute('aria-pressed') === 'false', 'Save broke undo history');
+      document.getElementById('result').textContent = 'PASS: rendered button clicks, multiple undo/redo, loaded state, clear, history branching, and save';
+    } catch (error) {
+      document.getElementById('result').textContent = `FAIL: ${error.message}`;
+    }
+  </script>
+</body>
+</html>
